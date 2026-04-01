@@ -5,7 +5,7 @@ const rateLimit = require('express-rate-limit');
 const NodeCache = require('node-cache');
 
 const app = express();
-const cache = new NodeCache({ stdTTL: 60 }); // 60 saniye cache
+const cache = new NodeCache({ stdTTL: 60 });
 
 // CORS
 app.use(cors({
@@ -24,7 +24,6 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// API-Sports axios instance
 const axios = require('axios');
 const apiSports = axios.create({
   headers: {
@@ -32,41 +31,42 @@ const apiSports = axios.create({
   }
 });
 
-// Cache middleware
-const withCache = (key, ttl = 60) => async (fn) => {
-  const cached = cache.get(key);
-  if (cached) return cached;
-  const data = await fn();
-  cache.set(key, data, ttl);
-  return data;
+// Bugünün tarihini Istanbul timezone'a göre al
+const getToday = () => {
+  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Istanbul' });
 };
 
 // ─── FOOTBALL ───────────────────────────────────────────────────────────────
 
-// Canlı maçlar
+// Bugünün maçları (live=all Free planda çalışmıyor, date kullanıyoruz)
 app.get('/api/football/live', async (req, res) => {
   try {
-    const cacheKey = 'football_live';
+    const today = getToday();
+    const cacheKey = `football_live_${today}`;
     const cached = cache.get(cacheKey);
     if (cached) return res.json(cached);
 
-    const response = await apiSports.get('https://v3.football.api-sports.io/fixtures?live=all');
-    cache.set(cacheKey, response.data, 30);
+    const response = await apiSports.get(
+      `https://v3.football.api-sports.io/fixtures?date=${today}&timezone=Europe/Istanbul`
+    );
+    cache.set(cacheKey, response.data, 60); // 60 saniye cache
     res.json(response.data);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Bugünkü maçlar
+// Bugünkü maçlar (aynı endpoint, alias)
 app.get('/api/football/today', async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getToday();
     const cacheKey = `football_today_${today}`;
     const cached = cache.get(cacheKey);
     if (cached) return res.json(cached);
 
-    const response = await apiSports.get(`https://v3.football.api-sports.io/fixtures?date=${today}`);
+    const response = await apiSports.get(
+      `https://v3.football.api-sports.io/fixtures?date=${today}&timezone=Europe/Istanbul`
+    );
     cache.set(cacheKey, response.data, 120);
     res.json(response.data);
   } catch (err) {
@@ -141,14 +141,18 @@ app.get('/api/football/standings/:leagueId', async (req, res) => {
 
 // ─── BASKETBALL ─────────────────────────────────────────────────────────────
 
+// Bugünün maçları (live=all Free planda çalışmıyor)
 app.get('/api/basketball/live', async (req, res) => {
   try {
-    const cacheKey = 'basketball_live';
+    const today = getToday();
+    const cacheKey = `basketball_live_${today}`;
     const cached = cache.get(cacheKey);
     if (cached) return res.json(cached);
 
-    const response = await apiSports.get('https://v1.basketball.api-sports.io/games?live=all');
-    cache.set(cacheKey, response.data, 30);
+    const response = await apiSports.get(
+      `https://v1.basketball.api-sports.io/games?date=${today}&timezone=Europe/Istanbul`
+    );
+    cache.set(cacheKey, response.data, 60);
     res.json(response.data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -157,12 +161,14 @@ app.get('/api/basketball/live', async (req, res) => {
 
 app.get('/api/basketball/today', async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getToday();
     const cacheKey = `basketball_today_${today}`;
     const cached = cache.get(cacheKey);
     if (cached) return res.json(cached);
 
-    const response = await apiSports.get(`https://v1.basketball.api-sports.io/games?date=${today}`);
+    const response = await apiSports.get(
+      `https://v1.basketball.api-sports.io/games?date=${today}&timezone=Europe/Istanbul`
+    );
     cache.set(cacheKey, response.data, 120);
     res.json(response.data);
   } catch (err) {
@@ -174,13 +180,14 @@ app.get('/api/basketball/today', async (req, res) => {
 
 app.get('/api/tennis/live', async (req, res) => {
   try {
-    const cacheKey = 'tennis_live';
+    const today = getToday();
+    const cacheKey = `tennis_live_${today}`;
     const cached = cache.get(cacheKey);
     if (cached) return res.json(cached);
 
-    // Tennis API - today's games
-    const today = new Date().toISOString().split('T')[0];
-    const response = await apiSports.get(`https://v1.tennis.api-sports.io/games?date=${today}`);
+    const response = await apiSports.get(
+      `https://v1.tennis.api-sports.io/games?date=${today}&timezone=Europe/Istanbul`
+    );
     cache.set(cacheKey, response.data, 60);
     res.json(response.data);
   } catch (err) {
@@ -213,7 +220,9 @@ app.get('/api/formula1/races', async (req, res) => {
     const cached = cache.get(cacheKey);
     if (cached) return res.json(cached);
 
-    const response = await apiSports.get(`https://v1.formula-1.api-sports.io/races?season=${season}`);
+    const response = await apiSports.get(
+      `https://v1.formula-1.api-sports.io/races?season=${season}`
+    );
     cache.set(cacheKey, response.data, 3600);
     res.json(response.data);
   } catch (err) {
@@ -228,7 +237,9 @@ app.get('/api/formula1/standings', async (req, res) => {
     const cached = cache.get(cacheKey);
     if (cached) return res.json(cached);
 
-    const response = await apiSports.get(`https://v1.formula-1.api-sports.io/rankings/drivers?season=${season}`);
+    const response = await apiSports.get(
+      `https://v1.formula-1.api-sports.io/rankings/drivers?season=${season}`
+    );
     cache.set(cacheKey, response.data, 3600);
     res.json(response.data);
   } catch (err) {
