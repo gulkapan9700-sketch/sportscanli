@@ -6,7 +6,12 @@ const NodeCache = require('node-cache');
 const axios = require('axios');
 
 const app = express();
-const cache = new NodeCache({ stdTTL: 600 }); // default 10 dakika cache
+
+// Cache
+const cache = new NodeCache({
+  stdTTL: 60,        // DEFAULT 60 sn
+  checkperiod: 120
+});
 
 // CORS
 app.use(cors({
@@ -17,27 +22,56 @@ app.use(cors({
 
 app.use(express.json());
 
-// Rate limiting (günlük 100 limit için daha sıkı kontrol)
+// Rate limiting – kullanıcı başı backend’i korur
 const limiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 saat
-  max: 10, // saatte en fazla 10 istek
-  message: { error: 'Çok fazla istek. Lütfen daha sonra deneyin.' }
+  windowMs: 60 * 1000,      // 1 dakika
+  max: 30,                 // dakikada 30 istek
+  message: { error: 'Çok fazla istek. Lütfen biraz sonra deneyin.' }
 });
 app.use('/api/', limiter);
 
 // API-Sports client
 const apiSports = axios.create({
+  baseURL: 'https://v3.football.api-sports.io',
   headers: {
     'x-apisports-key': process.env.API_SPORTS_KEY
+  },
+  timeout: 10000
+});
+
+// Istanbul tarih helper
+const getToday = () =>
+  new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Istanbul' });
+
+/* --------------------------------------------------
+   ✅ CANLI FUTBOL MAÇLARI
+-------------------------------------------------- */
+app.get('/api/football/live', async (req, res) => {
+  try {
+    const cacheKey = 'football_live';
+    const cached = cache.get(cacheKey);
+    if (cached) return res.json(cached);
+
+    const response = await apiSports.get('/fixtures', {
+      params: {
+        live: 'all',
+        timezone: 'Europe/Istanbul'
+      }
+    });
+
+    cache.set(cacheKey, response.data, 60); // 60 sn cache
+    res.json(response.data);
+  } catch (err) {
+    res.status(500).json({
+      error: 'Canlı maç verisi alınamadı',
+      detail: err.message
+    });
   }
 });
 
-// Bugünün tarihini Istanbul timezone'a göre al
-const getToday = () => {
-  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Istanbul' });
-};
-
-// Örnek endpoint: Bugünkü futbol maçları
+/* --------------------------------------------------
+   ✅ BUGÜNÜN MAÇLARI (FİKSTÜR)
+-------------------------------------------------- */
 app.get('/api/football/today', async (req, res) => {
   try {
     const today = getToday();
@@ -45,31 +79,23 @@ app.get('/api/football/today', async (req, res) => {
     const cached = cache.get(cacheKey);
     if (cached) return res.json(cached);
 
-    const response = await apiSports.get(
-      `https://v3.football.api-sports.io/fixtures?date=${today}&timezone=Europe/Istanbul`
-    );
-    cache.set(cacheKey, response.data, 600); // 10 dakika cache
+    const response = await apiSports.get('/fixtures', {
+      params: {
+        date: today,
+        timezone: 'Europe/Istanbul'
+      }
+    });
+
+    cache.set(cacheKey, response.data, 600); // 10 dk cache
     res.json(response.data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({
+      error: 'Bugünkü maçlar alınamadı',
+      detail: err.message
+    });
   }
 });
 
-// Status endpoint
-app.get('/api/status', async (req, res) => {
-  try {
-    const response = await apiSports.get('https://v3.football.api-sports.io/status');
-    res.json(response.data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'Sports API Backend çalışıyor 🚀' });
-});
-
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`✅ Server ${PORT} portunda çalışıyor`);
-});
+/* --------------------------------------------------
+   ✅ API STATUS
+-------------------------------------------------- */
